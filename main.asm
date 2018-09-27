@@ -5,50 +5,63 @@
 OPTION  CaseMap:None
 
 ; Includes
- include C:\masm32\include\windows.inc
+include C:\masm32_x86\include\windows.inc
 
- include C:\masm32\include\kernel32.inc
+include C:\masm32_x86\include\kernel32.inc
 
- include C:\masm32\include\user32.inc
+include C:\masm32_x86\include\user32.inc
 
 
- includelib C:\masm32\lib\kernel32.lib
+includelib C:\masm32_x86\lib\kernel32.lib
 
- includelib C:\masm32\lib\user32.lib
+includelib C:\masm32_x86\lib\user32.lib
 
 
 .data
 
-szClientModuleName db 'client.dll', 0
+szClientModuleName db 'client_panorama.dll', 0
 szEngineModuleName db 'engine.dll', 0
 
-szErrorCaption db '[ERROR]', 0
-szErrorClientModule db 'Could not initialize cheat', 0
 
-szStatusEnabled db 'Cheat is enabled!', 0
-szStatusDisabled db 'Cheat is disabled!', 0
+szNotificationCaption db 'Notification', 0
 
-offset_dwLocalPlayer				dd 00AB5D3Ch
+szErrorClientModule db 'Could not initialize cheat.', 0
+
+szSuccessLoaded		db 'Successfully initialized the cheat.', 0
+
+szSoundESP_Notification db 'SoundESP toggled.', 0
+
+szGlow_Notification db 'Glow toggled.', 0
+
+szDisabled_Notification db 'Disabled Glow & SoundESP.', 0
+
+
+offset_dwLocalPlayer				dd 00C5E87Ch
 offset_iTeamNum						dd 000000F0h
 offset_iHealth						dd 000000FCh
-offset_EntityList					dd 04A913B4h
+offset_EntityList					dd 04C3B384h
 offset_vecOrigin					dd 00000134h
-offset_dwClientState				dd 00586A74h
+offset_dwClientState				dd 00588A74h
 offset_dwClientState_MaxPlayer		dd 00000310h
+offset_dwGlowObjectManager			dd 0517A668h
+offset_dwGlowIndex					dd 0000A320h
 
-dwCheatStatus						dd 00000000h
+bCheatStatus						db 0 
 
 .data?
 
-dwClientBase			dd ?
-dwEngineBase			dd ?
+dwClientBase						dd ?
+dwEngineBase						dd ?
 
-dwLocalPlayer			dd ?
-dwLocalPlayer_Team		dd ?
-dwLocalPlayer_Health	dd ?
+dwLocalPlayer						dd ?
+dwLocalPlayer_Team					dd ?
+dwLocalPlayer_Health				dd ?
 
-dwClientState			dd ?
-dwClientState_MaxPlayer	dd ?
+dwClientState						dd ?
+dwClientState_MaxPlayer				dd ?
+
+dwGlowObjectManager					dd ?
+
 .code
 
 ; ======================
@@ -89,7 +102,7 @@ InitializeCheat proc
 
 	jz Error
 	
-	; Store eax in dwClientBase
+	; Store eax in dwClientState
 	mov dword ptr ds:[ dwClientState ], eax
 
 	; Add the offset for clientstate_MaxPlayer on eax
@@ -139,6 +152,21 @@ InitializeCheat proc
 	; Move the 'relative' address in eax
 	mov dword ptr ds:[ dwLocalPlayer_Health ], eax
 
+	; EAX = *(DWORD*)dwClientBase;
+	mov eax, dword ptr ds:[ dwClientBase ]
+
+	; EAX += *(DWORD*)offset_dwGlowObjectManager;
+	add eax, dword ptr ds:[ offset_dwGlowObjectManager ]
+
+	; EAX = *(DWORD*)EAX;
+	mov eax, dword ptr cs:[ eax ]
+
+	cmp eax, 0
+
+	jz Error
+
+	mov dword ptr ds:[ dwGlowObjectManager ], eax
+
 
 	; Set the return value to 1 ( == true )
 	mov eax, 1
@@ -149,7 +177,7 @@ InitializeCheat proc
 Error:
 	
 	; MessageBox( 0, szErrorClientModule, szErrorCaption, 0 )
-	invoke MessageBox, 0, offset szErrorClientModule, offset szErrorCaption, 0
+	invoke MessageBox, 0, offset szErrorClientModule, offset szNotificationCaption, 0
 
 	; Sleep( 5000 )
 	invoke Sleep, 5000
@@ -330,7 +358,7 @@ GetDistanceToEntity proc dwEntity:dword
 	jz Fail
 
 
-	; Initialize fpu stuck with default values, no need but just to be 'safe'
+	; Initialize fpu stack with default values, no need but just to be 'safe'
 	finit
 
 	; Load the x coordinate from the entity and the player with pointer size as 32 bit single precision floating point value
@@ -370,7 +398,7 @@ GetDistanceToEntity proc dwEntity:dword
 	; add the first element with the second element and pop the first element from the stack
 	faddp
 
-	; Square the first element
+	; Calculate the root of the sum
 	fsqrt
 
 	; Store the first element as a integer with pointer size 4 byte in the local variable
@@ -412,40 +440,70 @@ GetMaxClients proc
 GetMaxClients endp
 
 ; ======================
-; Description: Set the variable dwCheatStatus to 0 or 1, depends on it last number
-; Returns: n o t h i n g..oh
+; Checks if specific keys were pressed and if this was the case bits were modified
 ; ======================
-ToggleCheatStatus proc
+HandleCheatStatus proc
 
 	push eax
 
-	mov eax, dword ptr ds:[ dwCheatStatus ]
+	
+	invoke GetAsyncKeyState, VK_F8
 
 	cmp eax, 0
 
+	jnz ToggleSoundESP
+
+	
+	invoke GetAsyncKeyState, VK_F9
+
+	cmp eax, 0
+
+	jnz ToggleGlow
+
+
+	invoke GetAsyncKeyState, VK_F10
+
+	cmp eax, 0
+
+	jnz DisableBoth
+
+
+	pop eax 
+
+	ret
+
+	
+ToggleSoundESP:
+	
+	xor byte ptr ds:[ bCheatStatus ], 1
+
+	invoke MessageBoxA, 0, offset szSoundESP_Notification, offset szNotificationCaption, 0
+
 	pop eax
 
-	jz Enable
+	ret
 
-	jg Disable
+ToggleGlow:
 
-Enable:
-	
-	mov dword ptr ds:[ dwCheatStatus ], 1
+	xor byte ptr ds:[ bCheatStatus ], 2
 
-	invoke MessageBox, 0, 0, offset szStatusEnabled, 0
+	invoke MessageBoxA, 0, offset szGlow_Notification, offset szNotificationCaption, 0
+
+	pop eax
 
 	ret
 
-Disable:
+DisableBoth:
 	
-	mov dword ptr ds:[ dwCheatStatus ], 0
+	mov byte ptr ds:[ bCheatStatus ], 0
 
-	invoke MessageBox, 0, 0, offset szStatusDisabled, 0
+	invoke MessageBoxA, 0, offset szDisabled_Notification, offset szNotificationCaption, 0
+	
+	pop eax
 
 	ret
 
-ToggleCheatStatus endp
+HandleCheatStatus endp
 
 
 ; ======================
@@ -463,6 +521,87 @@ GetHealthFromPlayer proc
 GetHealthFromPlayer endp
 
 
+; ==================
+; Returns the glow index from a entity as a 4 byte signed integer
+; ==================
+GetGlowIndexFromEntity proc dwEntity:dword
+	
+	; EAX = *(DWORD*)( EBP + $dwEntity );
+	mov eax, dwEntity
+
+	; EAX += *(DWORD*)offset_dwGlowIndex;
+	add eax, dword ptr ds:[ offset_dwGlowIndex ]
+
+	; EAX = *(DWORD*)EAX;
+	mov eax, dword ptr cs:[ eax ]
+
+	ret 4
+
+GetGlowIndexFromEntity endp
+
+; ==================
+; 'Registers' a glow object with given index of the array( glowobjectmanager )
+; ==================
+GlowEntity proc dwIndex:dword
+
+	local dwTemp : dword ; A local variable which will hold temporary values for the fpu usage
+
+	push eax
+
+	push edx
+
+	push ebx
+
+
+	mov edx, dword ptr ds:[ dwGlowObjectManager ] 
+
+	mov ebx, dword ptr ss:[ dwIndex ]
+
+	imul ebx, 56 
+
+	lea eax, dword ptr cs:[ edx + ebx ] ; EAX contains now dwGlowObjectManager + dwIndex * 56
+
+	
+	add eax, 4 ; 'Points' to m_flRed
+
+	finit ; Initialize fpu stack
+
+	mov dwTemp, 1 
+	fild dword ptr ss:[ dwTemp ] 
+	fstp real4 ptr [ eax ] ; GlowObject->m_flRed = (float)1;
+
+	add eax, 4 ; 'Points' to m_flGreen
+	mov dwTemp, 0
+	fild dword ptr ss:[ dwTemp ]
+	fstp real4 ptr [ eax ] ; GlowObject->m_flGreen = (float)0;
+
+	add eax, 4 ; 'Points' to m_flBlue
+	fild dword ptr ss:[ dwTemp ]
+	fstp real4 ptr [ eax ] ; GlowObject->m_flBlue = (float)0;
+
+	add eax, 4 ; 'Points' to m_flAlpha
+	mov dwTemp, 1
+	fild dword ptr ss:[ dwTemp ] 
+	fstp real4 ptr [ eax ] ; GlowObject->m_flAlpha = (float)1;
+
+	add eax, 20 ; Skip some variables
+	mov byte ptr [ eax ], 1 ; Set m_bRenderOccluded to 1
+	
+	inc eax
+	mov byte ptr [ eax ], 0 ; Set m_bRenderUnoccluded to 0
+
+	pop ebx
+
+	pop edx
+
+	pop eax
+
+	ret 4
+
+GlowEntity endp
+
+
+
 ; ======================
 ; |		Entrypoint     |
 ; ======================
@@ -476,20 +615,17 @@ Setup:
 
 	jz RetrySetup
 
+	invoke MessageBoxA, 0, offset szSuccessLoaded, offset szNotificationCaption, 0
 
 Preroutine:
 
-	; Actually I don't like invoke but it is kinda smooth... checking if end key is pressed
-	invoke GetAsyncKeyState, VK_END
+	call HandleCheatStatus
 
-	cmp eax, 0
-
-	jnz ToggleStatus
-
+	invoke Sleep, 1
 
 Think:
 
-	mov eax, dword ptr ds:[ dwCheatStatus ]
+	movsx eax, byte ptr ds:[ bCheatStatus ]
 
 	cmp eax, 0
 
@@ -538,7 +674,7 @@ EntityLoop:
 
 	cmp eax, 0
 
-	jle SkipEntity
+	jz SkipEntity
 
 	mov edx, eax
 
@@ -561,8 +697,47 @@ EntityLoop:
 
 	jg SkipEntity
 
-	; much leet, much wow
+	push esi
+
+	movsx esi, byte ptr ds:[ bCheatStatus ]
+
+	cmp esi, 1
+
+	pop esi
+
+	jz DoSoundESP
+
+	jg DoGlow
+
+	jl SkipEntity
+
+	jmp SkipEntity ; Really strange, vs doesn't like jl
+	
+DoGlow:
+	push edx
+	call GetGlowIndexFromEntity
+
+	push eax
+	cmp eax, 0
+	pop eax
+
+	jle InvalidGlowIndex
+
+	push eax
+	call GlowEntity
+
+	jmp SkipEntity
+
+DoSoundESP:
+
 	invoke Beep, 1337h, 32h
+
+	jmp SkipEntity
+
+
+InvalidGlowIndex:
+
+	invoke Sleep, 1
 
 	jmp SkipEntity
 
@@ -581,39 +756,11 @@ ExitEntityLoopAndPrestart:
 	
 
 SkipEntity:
-	
-	invoke GetAsyncKeyState, VK_END
-
-	cmp eax, 0
-
-	jnz ExitEntityLoopAndToggleStatus
 
 	inc ebx
 
 	jmp EntityLoop
 
-
-ExitEntityLoopAndToggleStatus:
-
-	pop ebx
-
-	pop edx
-
-	pop esi
-
-	pop edi
-
-	call ToggleCheatStatus
-
-	jmp PreStartAgain
-
-ToggleStatus:
-	
-	invoke Sleep, 1
-
-	call ToggleCheatStatus
-
-	jmp Preroutine
 
 PreStartAgain:
 
